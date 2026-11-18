@@ -134,6 +134,7 @@ $c = Get-Content views/styles.css -Raw; "$(([regex]::Matches($c,'\{')).Count)/$(
 - 视觉 / 交互：用 `<scratch>\build-preview.cjs [dark|light] [list|editor|preview]` 生成带 mock bridge 的预览页，在浏览器面板里逐态核对计算样式与截图。
 - 打包：`PluginPack` 生成 `dist/io.github.g1oow.sidebar-note-<version>.piplug`；不要用 shell 手工打 zip（安装器只认未压缩归档）。
 - **不提交 git**：除非用户明确要求。
+- 打包排除：宿主 `PluginPack` 只忽略 `.git`、`node_modules`、`dist/` 与 `.env` / `*.pem` / `*.key` 这类密钥文件，**没有自定义排除**，所以 `AGENT.md`、`.gitignore` 会被一起打进本地 `.piplug`。要干净的包就先 `Move-Item AGENT.md ..` 再打包，打完移回；市场提交时直接在 `files` 里不传它们。
 
 ## 9. 已知坑（踩过的，别再踩）
 
@@ -144,3 +145,65 @@ $c = Get-Content views/styles.css -Raw; "$(([regex]::Matches($c,'\{')).Count)/$(
 5. 视图 tab 属于会话：没有会话时命令只能提示。
 6. 面板关闭 / 切走前会 `flushSave()`（`visibilitychange`、`window blur`），所以「未保存」提示只覆盖编辑器内的离开动作。
 7. 宿主对 docked 视图调 `resetEmbeddedSurfaceChrome()`，给 `html` **和** `body` 写 inline `background: transparent`。inline 盖过样式表，所以 `body { background: var(--bg) }` 在宿主里等于没设——只剩自带 `--bg-bar` 的顶栏/状态栏有色、主体露白。**底色必须画在 `.shell` 上**，不要放 `body`。
+8. `contributes.commands[].title` 在 schema 文档里写作 `string | { en, "zh-CN" }`，但宿主 0.22.0 的校验器只接受**字符串**：写成双语对象会被 `PluginCheck` 拒绝（`command "note.open" requires a title`）。命令标题保持单字符串，本地化交给运行时 `pi.commands.register`。
+
+## 10. 发布到插件市场
+
+市场是 **plugins.aiuo.net**，发布走 MCP（`https://plugins.aiuo.net/mcp`）。规则全文：`https://plugins.aiuo.net/skill.md`。不要手工传 zip，也不要自己生成 `.submission.json`——平台用收到的字段重建 `manifest.json` 并自己打包。
+
+### 10.1 凭证
+
+- token 文件：`~/.pi-desktop/plugin-center.token`（ACL 仅当前用户）。**永不打印、永不入库、永不写 scratch。**
+- 缺失或 401/403 才走设备授权：`POST /api/v1/device/start` → 用 `cmd.exe /c start` 打开 `verificationUriComplete` → 每 5 秒轮询 `/api/v1/device/token` → 拿到 `accessToken` **立刻落盘**。
+- 设备码 10 分钟过期。踩过的坑：有一次只把 token 打印出来没保存，结果码被消费、又得重新授权一次。
+- 已有有效 token 时不要重新授权。
+
+### 10.2 上传前必须过 i18n gate
+
+从 skill.md 取脚本，在插件目录跑，**0 fail** 才能上传：
+
+- `i18n.en` / `i18n.zh-CN` 的 `name`、`description`、`safetyNotes` 都不为空。
+- 本地化槽位（`contributes.views[].title` 等）必须是 `{ en, "zh-CN" }` 且两种语言都非空——半翻译会被宿主直接拒绝。
+- 展示文案里不能有 HTML 实体、标签、控制字符、双重转义（`\n`、`\"`）。
+- 面板文案表必须 en / zh-CN 同键、同占位符。
+- `REVIEW` 可以保留，但要在报告里说明理由（本项目的命令标题就是有意保留单字符串，见 9.8）。
+
+### 10.3 版本与 Git
+
+- `manifest.version` 与 tag `v<version>` 必须对应；`sourceRef` 传 tag（或 commit SHA）。
+- 发布前：改 version + CHANGELOG → PR 合并到 `main` → 打 annotated tag → push。
+- 本地产物用 `PluginPack` 出 `dist/*.piplug`，可挂到 GitHub Release 附件，方便手动安装。
+
+### 10.4 MCP 调用顺序
+
+1. `whoami` — 确认账号可发布、今日额度。
+2. `list_plugins` — 判断 id 是否已存在。
+3. 首次：`list_repositories` → `create_plugin`；已存在：`submit_version`。
+4. `plugin_status` **只查一次**然后停。不要重复提交 waiting 中的版本。
+
+`create_plugin` / `submit_version` 的 `arguments`：
+
+- 身份：`id`、`version`、`name`、`description`、`main`、`permissions`、`engines`
+- 目录文案：`i18n`（整块）、`author`、`license`（SPDX）、`homepage`、`safetyNotes`、`readme`、`changelog`、`releaseNotes`（必填）
+- 宿主加载契约：`ui`、`contributes`、`activationEvents`、`fs`、`net`、`renderer*`——本地有就必须原样传，漏了会 `PLUGIN_INVALID`
+- `files`：除 `manifest.json` 外的运行时文件，`{ path, content }`；二进制用 `{ path, contentBase64 }`（本项目是 `icon.png`）。**`AGENT.md`、`.gitignore` 不进市场包**——只留在仓库，`files` 里不传。
+- `sourceRef`：tag 名
+- `repository`：`create_plugin` 必填，取自 `list_repositories` 的 `coordinate`
+
+### 10.5 平台包 ≠ 本地包
+
+平台按收到的字段重建 `manifest.json` 再打包，所以体积和 SHA-256 都与本地 `dist/*.piplug` 不同。**以 `plugin_status` 返回的 `sha256` / `sizeBytes` 为准**，本地 SHA 只用于本地校验。
+
+### 10.6 当前记录
+
+| 项 | 值 |
+|---|---|
+| 插件 id | `io.github.g1oow.sidebar-note` |
+| 首版 | `0.1.0`（channel `stable`，status `approved`，trust `community`） |
+| sourceRef / commit | `v0.1.0` → `d316edb` |
+| 平台产物 | 173,456 字节 / SHA-256 `5e7e9a5bf166ff75b6fad3f4cc7bc3c1453bb2d5438bdaf83f08eaf66c91dab3` |
+| 权限 | `ui.view`、`clipboard.write` |
+
+### 10.7 后续发版
+
+改 `manifest.version` + CHANGELOG → PR → 合并 → 新 tag → `submit_version`（同一 `pluginId`）。token 有效期内不需要重新授权。
