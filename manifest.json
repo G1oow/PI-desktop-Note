@@ -7,6 +7,7 @@
   "author": "G1oow",
   "homepage": "https://github.com/G1oow/PI-desktop-Note",
   "repository": "https://github.com/G1oow/PI-desktop-Note",
+  "icon": "icon.png",
   "safetyNotes": "笔记保存在插件自己的数据目录（notes.json，附自动快照），不读写工作区文件，不访问网络，不使用剪贴板读取。仅在用户主动点“复制”时写入剪贴板。",
   "main": "main.js",
   "contributes": {
