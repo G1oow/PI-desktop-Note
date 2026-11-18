@@ -28,8 +28,8 @@
 
 **开发加载（推荐用于调试）**
 
-1. 打开 PI-Desktop → **插件**（Extensions 页）。
-2. 右上角溢出菜单 → **加载开发插件**，选择本目录（含 `manifest.json` 的那一层）。
+1. 打开 PI-Desktop → **扩展**（Extensions）。
+2. 右上角的 ⋯ 菜单 → **加载本地插件**，选择本目录（含 `manifest.json` 的那一层）。
 3. 审阅并授予 `ui.view`、`clipboard.write`。
 4. 打开任意会话，在右侧工作面板的「新建」菜单里选「笔记」。
 
@@ -43,7 +43,24 @@ pnpm pi-plugin pack .
 # → dist/io.github.g1oow.sidebar-note-0.1.0.piplug
 ```
 
-然后在 **插件 → 安装插件包** 里选择生成的 `.piplug`（store-only ZIP，必须用 devkit 打包）。
+然后在 **扩展 → ⋯ → 安装插件包** 里选择生成的 `.piplug`（store-only ZIP，必须用 devkit 打包）。
+**调试：`diagnostics.log`**
+
+面板每次启动和尺寸变化，都会把自己的真实布局写进插件数据目录（`<PI 数据目录>/plugins/data/io.github.g1oow.sidebar-note/diagnostics.log`），每行一条 JSON：
+
+| 字段 | 含义 |
+|---|---|
+| `panelWidth` | 视图认为的面板宽度（= `min(body, innerWidth, visualViewport)`） |
+| `bodyWidth` / `innerWidth` / `visualWidth` | 三个来源各自的宽度，用来判断谁更窄 |
+| `docScrollWidth` | 文档实际宽度：大于 `panelWidth` 就是横向溢出（被裁） |
+| `shellClientWidth` / `shellScrollWidth` | `.shell` 的布局像素（已除以缩放）：两个值不等才是视图内部溢出 |
+| `zoom` / `dpr` | 当前缩放百分比与设备像素比 |
+| `narrow` / `tiny` / `tight` | 窄面板 / 极窄 / 编辑器顶栏紧凑态是否命中 |
+
+「右侧被裁」的判据是 `docScrollWidth > panelWidth`：文档真的横向溢出了。注意 `shellClientWidth` / `shellScrollWidth` 是 `.shell` 在 `zoom` 之前的布局像素，恒等于 `panelWidth / zoom`，所以**只能彼此比较**；拿它和 `panelWidth` 比会把正常缩放误判成溢出（364px 面板在 95% 下读到的就是 384）。
+
+每次会话最多 40 条，超过 64 KiB 自动只保留后半；**不记录任何笔记内容**。
+
 
 ## 命令与快捷键
 
@@ -106,7 +123,7 @@ pnpm pi-plugin pack .
 | 项 | 采用 | 说明 |
 |---|---|---|
 | 字体 | **MiSans**（界面）+ **JetBrains Mono**（正文与代码） | 只按系统字体名引用，**不打包字体文件**：MiSans 单字重约 8 MB，整族远超 `.piplug` 的 50 MiB 上限。用 `@font-face { src: local(...) }` 把 Light/Regular/Medium/Semibold 绑到 300/400/500/600/700，系统没装时自动落到无衬线回退栈。 |
-| 配色 | **OpenCode** 双调色板 | 深色：`#0a0a0a` 底、`#141414` 面板、紫 `#9d7cd8`、薄荷 `#7fd88f`、琥珀 `#f5a742`；浅色：白底、标题 `#b06915`、代码 `#27793d`、链接 `#2c66b8`。语义映射对齐 OpenCode 的 markdown 规则：标题=accent、粗体=琥珀、斜体=小麦、行内代码=薄荷/玉绿、链接=青蓝、无序标记=蜜桃。 |
+| 配色 | **OpenCode** 双调色板 | 深色：`#121212` 底（比宿主 OpenCode 的 `#0a0a0a` 亮一档，否则插件面板和宿主背景融成一片）、`#1a1a1a` 栏与卡片、`#242424` 字段、紫 `#9d7cd8`、薄荷 `#7fd88f`、琥珀 `#f5a742`；浅色：白底、标题 `#b06915`、代码 `#27793d`、链接 `#2c66b8`。语义映射对齐 OpenCode 的 markdown 规则：标题=accent、粗体=琥珀、斜体=小麦、行内代码=薄荷/玉绿、链接=青蓝、无序标记=蜜桃。 |
 | 图标 | **Iconoir**（MIT） | 8 个图标（search / plus / nav-arrow-left / pin / copy / trash / page / check / zoom）以内联 `<symbol>` sprite 打包，描边 1.5、24 网格，随 `currentColor` 变色，**无任何外链请求**。 |
 | 组件 | 参考 **Obsidian** | 发丝分隔线、6px 圆角、hover 只给一层极浅底色、无渐变无重投影；列表行、分段式范围切换、实心勾选框、左侧竖线引用块、细滚动条。 |
 | 动效 | **Motion 风格**（自实现） | 分段滑块用纯色块 + 260ms 弹簧位移（对应示例的 `stiffness:400 / damping:30`）；开关与气泡/面板入场同样是透明度 + 位移的弹簧曲线。宿主不允许运行时拉 CDN，所以弹簧是 CSS 曲线而非 motion 库，`prefers-reduced-motion` 时全部关闭。 |

@@ -40,6 +40,7 @@
 - 快照：`snapshots/`，10 分钟最多一份，保留 5 份；`notes.json` 损坏时自动回退到最新快照。
 - 上限：5000 条 / 标题 200 字 / 正文 200000 字，超长截断。
 - 结构变更必须同时改：读取时的字段校验、写盘时的白名单、`smoke-main.cjs` 的用例。
+- 诊断：面板上报的布局数据写 `diagnostics.log`（`note:diag` 通道）。只落白名单字段（宽度、缩放、滚动尺寸、UA），**不得**写入标题或正文；超过 64 KiB 自动只留后半。
 
 ## 5. 交互规范（重要）
 
@@ -128,7 +129,7 @@ node --check views/app.js
 $c = Get-Content views/styles.css -Raw; "$(([regex]::Matches($c,'\{')).Count)/$(([regex]::Matches($c,'\}')).Count)"
 ```
 
-- 数据层冒烟：`node <scratch>\smoke-main.cjs`（24 项，含快照 / 损坏回退 / 上限 / 未知通道）。
+- 数据层冒烟：`node <scratch>\smoke-main.cjs`（25 项，含快照 / 损坏回退 / 上限 / 未知通道 / 诊断白名单）。
 - 插件校验：`PluginCheck`（清单、入口、面板、权限、包体上限），必须零警告。
 - 视觉 / 交互：用 `<scratch>\build-preview.cjs [dark|light] [list|editor|preview]` 生成带 mock bridge 的预览页，在浏览器面板里逐态核对计算样式与截图。
 - 打包：`PluginPack` 生成 `dist/io.github.g1oow.sidebar-note-<version>.piplug`；不要用 shell 手工打 zip（安装器只认未压缩归档）。
@@ -142,3 +143,4 @@ $c = Get-Content views/styles.css -Raw; "$(([regex]::Matches($c,'\{')).Count)/$(
 4. `window.open` 被宿主拒绝，外链只能复制。
 5. 视图 tab 属于会话：没有会话时命令只能提示。
 6. 面板关闭 / 切走前会 `flushSave()`（`visibilitychange`、`window blur`），所以「未保存」提示只覆盖编辑器内的离开动作。
+7. 宿主对 docked 视图调 `resetEmbeddedSurfaceChrome()`，给 `html` **和** `body` 写 inline `background: transparent`。inline 盖过样式表，所以 `body { background: var(--bg) }` 在宿主里等于没设——只剩自带 `--bg-bar` 的顶栏/状态栏有色、主体露白。**底色必须画在 `.shell` 上**，不要放 `body`。

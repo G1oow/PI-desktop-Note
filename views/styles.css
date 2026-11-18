@@ -4,8 +4,8 @@
  * 字体：MiSans（界面）+ JetBrains Mono（正文与代码）。
  *       MiSans 只按系统字体名引用，不打包字体文件——单字重 8 MB，整族远超 50 MiB 包上限；
  *       用 @font-face + local() 把真实字重绑到 400/500/600，缺失时自动落到系统无衬线。
- * 配色：OpenCode 双调色板（深色 #0a0a0a 底 + 紫 #9d7cd8、薄荷 #7fd88f、琥珀 #f5a742；
- *       浅色白底 + 琥珀标题 #b06915、玉绿代码 #27793d、蓝链接 #2c66b8）。
+ * 配色：OpenCode 双调色板（深色 #121212 底——比宿主 #0a0a0a 亮一档以显出面板边界，
+ *       紫 #9d7cd8、薄荷 #7fd88f、琥珀 #f5a742；浅色白底 + 琥珀标题 #b06915、玉绿代码 #27793d、蓝链接 #2c66b8）。
  * 组件：按 Obsidian 的气质——发丝分隔线、6px 圆角、克制的 hover、无渐变无重阴影。
  *
  * 视图是独立页面，宿主不会注入 app 的 CSS 变量；字号也不写死缩放，宿主会整体 zoom。
@@ -56,13 +56,14 @@
 }
 
 :root[data-theme="dark"] {
-  --bg: #0a0a0a;
-  --bg-bar: #141414;
-  --field: #1e1e1e;
-  --field-hover: #262626;
+  /* 比宿主 OpenCode 深色底（#0a0a0a）亮一档：同色会让插件面板和宿主背景融成一片，看不出边界。 */
+  --bg: #121212;
+  --bg-bar: #1a1a1a;
+  --field: #242424;
+  --field-hover: #2c2c2c;
   --hover: rgba(255, 255, 255, 0.05);
-  --line: #282828;
-  --line-soft: #1e1e1e;
+  --line: #2f2f2f;
+  --line-soft: #1f1f1f;
   --text: #eeeeee;
   --text-dim: #b0b0b0;
   --muted: #808080;
@@ -77,7 +78,7 @@
   --marker: #fab283;
   --danger: #e06c75;
   --pinned: #f5a742;
-  --code-bg: #0f0f12;
+  --code-bg: #191919;
   --ring: rgba(157, 124, 216, 0.45);
   --shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
   /* 提示气泡浮在内容之上，用比栏底色更亮一档的实色，才不会被同色背景吃掉。 */
@@ -155,6 +156,10 @@ body {
   /* body 已经被限制在视口内，这里只保证不超出父级宽度（zoom 下 vw 会被缩放，别用它） */
   max-width: 100%;
   height: 100%;
+  /* 底色画在 .shell 上，不能只靠 body：宿主对 docked 视图会给 html/body 写 inline
+     background: transparent（resetEmbeddedSurfaceChrome），inline 盖过样式表，主体就会露白，
+     只有顶栏/状态栏（自带 --bg-bar）看起来还在跟着主题走。 */
+  background: var(--bg);
   zoom: var(--ui-zoom, 1);
   min-height: 0;
 }

@@ -54,6 +54,63 @@ function log(message) {
   console.log(`[${PLUGIN_ID}] ${message}`);
 }
 
+/**
+ * 调试模式：面板把真实布局（面板宽度、缩放、滚动尺寸）写进数据目录的
+ * diagnostics.log。宿主里的面板宽度只有页面自己知道，出问题时读文件即可定位，
+ * 不用靠截图猜。只落白名单字段，笔记内容永远不进这个文件。
+ */
+const DIAG_FILE = "diagnostics.log";
+const DIAG_MAX_BYTES = 64 * 1024;
+const DIAG_FIELDS = [
+  "panelWidth",
+  "bodyWidth",
+  "innerWidth",
+  "visualWidth",
+  "bodyHeight",
+  "innerHeight",
+  "docScrollWidth",
+  "docScrollHeight",
+  "shellClientWidth",
+  "shellScrollWidth",
+  "zoom",
+  "dpr",
+  "narrow",
+  "tiny",
+  "tight",
+];
+/**
+ * 写入一条诊断记录：payload = { event, values, viewport }。
+ * values 只接受 DIAG_FIELDS 里的数值/布尔值，viewport 只记 UA（区分宿主与本地预览）。
+ */
+function writeDiag(payload) {
+  if (!dataDir) return { ok: false, reason: "no-data-dir" };
+  const source = payload && typeof payload === "object" ? payload : {};
+  const values = source.values && typeof source.values === "object" ? source.values : {};
+  const row = { t: nowIso(), event: clampText(String(source.event || "?"), 32) };
+  for (const key of DIAG_FIELDS) {
+    const value = values[key];
+    if (typeof value === "boolean") row[key] = value;
+    else if (typeof value === "number" && Number.isFinite(value)) {
+      row[key] = Math.round(value * 100) / 100;
+    }
+  }
+  if (typeof source.viewport === "string") row.viewport = clampText(source.viewport, 240);
+  try {
+    const file = path.join(dataDir, DIAG_FILE);
+    fs.appendFileSync(file, `${JSON.stringify(row)}\n`, "utf8");
+    if (fs.statSync(file).size > DIAG_MAX_BYTES) {
+      const text = fs.readFileSync(file, "utf8");
+      fs.writeFileSync(file, text.slice(Math.floor(text.length / 2)), "utf8");
+      fs.appendFileSync(file, `${JSON.stringify({ t: nowIso(), event: "rotated" })}\n`, "utf8");
+    }
+    return { ok: true };
+  } catch (error) {
+    log(`diagnostics write failed: ${error?.message || error}`);
+    return { ok: false, reason: "write-failed" };
+  }
+}
+
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -479,6 +536,8 @@ async function onPanelInvoke(channel, payload) {
         return undoDelete(payload);
       case "note:copy":
         return await copyText(payload);
+      case "note:diag":
+        return writeDiag(payload);
       default:
         throw fail("UNSUPPORTED", `未知通道：${String(channel)}`);
     }
