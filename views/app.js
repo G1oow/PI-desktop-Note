@@ -762,8 +762,48 @@
       else layoutSegThumbs();
       fitEditorBar();
       renderGutter();
+      reportDiag("layout");
     }, 90);
   }
+  const DIAG_LIMIT = 40;
+  let diagSent = 0;
+  const diagLastAt = new Map();
+
+  /**
+   * 调试模式：把面板的真实布局写进插件数据目录的 diagnostics.log（由 main.js 落盘）。
+   * 宿主里的面板宽度只有页面自己知道，「右边被裁」这类问题读一行诊断就能判断是面板窄、
+   * 还是视图本身比可见区域宽。每次会话最多 40 条，同一事件 400ms 内只发一次。
+   */
+  function reportDiag(event) {
+    if (!bridge || typeof bridge.invoke !== "function") return;
+    // 热重载后的首帧 webview 还没给出尺寸，这时上报只会写进一堆 0，等 layout 再报。
+    if (!document.body.clientWidth) return;
+    if (diagSent >= DIAG_LIMIT) return;
+    const now = Date.now();
+    if (now - (diagLastAt.get(event) || 0) < 400) return;
+    diagLastAt.set(event, now);
+    diagSent += 1;
+    const shell = els.shell;
+    const values = {
+      panelWidth: Math.round(panelWidth()),
+      bodyWidth: document.body.clientWidth,
+      innerWidth: window.innerWidth,
+      visualWidth: window.visualViewport ? Math.round(window.visualViewport.width) : 0,
+      bodyHeight: document.body.clientHeight,
+      innerHeight: window.innerHeight,
+      docScrollWidth: document.documentElement.scrollWidth,
+      docScrollHeight: document.documentElement.scrollHeight,
+      shellClientWidth: shell ? shell.clientWidth : 0,
+      shellScrollWidth: shell ? shell.scrollWidth : 0,
+      zoom: Math.round(effectiveZoomPercent()),
+      dpr: Math.round((window.devicePixelRatio || 1) * 100) / 100,
+      narrow: shell ? shell.classList.contains("is-narrow") : false,
+      tiny: shell ? shell.classList.contains("is-tiny") : false,
+      tight: els.editorBar ? els.editorBar.classList.contains("is-tight") : false,
+    };
+    call("note:diag", { event, values, viewport: navigator.userAgent }).catch(() => {});
+  }
+
 
   /**
    * 锚点矩形（视口坐标）。
@@ -1703,6 +1743,7 @@
 
     await syncAppearance();
     await refreshList();
+    reportDiag("boot");
   }
 
   if (document.readyState === "loading") {
