@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.g1oow.sidebar-note",
   "name": "Notes",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "工作面板里的笔记：按项目隔离的笔记列表加一个全局收件箱，Markdown 编辑与预览，自动保存。",
   "author": "G1oow",
   "homepage": "https://github.com/G1oow/PI-desktop-Note",
@@ -55,7 +55,7 @@
       "safetyNotes": "Notes live in the plugin's own data directory (notes.json with automatic snapshots). The plugin does not read or write workspace files, makes no network requests, and never reads the clipboard; it writes to it only when the user clicks Copy."
     },
     "zh-CN": {
-      "name": "笔记",
+      "name": "PI·侧边栏笔记",
       "description": "工作面板里的笔记：按项目隔离的笔记列表加一个全局收件箱，Markdown 编辑与预览，自动保存。",
       "safetyNotes": "笔记保存在插件自己的数据目录（notes.json，附自动快照），不读写工作区文件，不访问网络，不使用剪贴板读取。仅在用户主动点“复制”时写入剪贴板。"
     }

@@ -1,4 +1,4 @@
-# 侧栏笔记（Notes）— PI-Desktop 插件
+# PI·侧边栏笔记（Notes）— PI-Desktop 插件
 
 右侧工作面板里的笔记：按项目分开的笔记列表 + 一个跨项目的收件箱，Markdown 编辑与预览，自动保存。
 
