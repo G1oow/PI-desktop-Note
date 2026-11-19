@@ -179,7 +179,7 @@ $c = Get-Content views/styles.css -Raw; "$(([regex]::Matches($c,'\{')).Count)/$(
 1. `whoami` — 确认账号可发布、今日额度。
 2. `list_plugins` — 判断 id 是否已存在。
 3. 首次：`list_repositories` → `create_plugin`；已存在：`submit_version`。
-4. `plugin_status` **只查一次**然后停。不要重复提交 waiting 中的版本。
+4. `plugin_status` **只查一次**然后停。`submit_version` 过自动门禁后 status 是 `approved`，还要等运营在后台发布（`published`）才对用户可见；等待期间不要重复提交。
 
 `create_plugin` / `submit_version` 的 `arguments`：
 
@@ -199,9 +199,9 @@ $c = Get-Content views/styles.css -Raw; "$(([regex]::Matches($c,'\{')).Count)/$(
 | 项 | 值 |
 |---|---|
 | 插件 id | `io.github.g1oow.sidebar-note` |
-| 首版 | `0.1.0`（channel `stable`，status `approved`，trust `community`） |
-| sourceRef / commit | `v0.1.0` → `d316edb` |
-| 平台产物 | 173,456 字节 / SHA-256 `5e7e9a5bf166ff75b6fad3f4cc7bc3c1453bb2d5438bdaf83f08eaf66c91dab3` |
+| 当前版本 | `0.1.1`（status `approved`，等运营上架；`0.1.0` 为已 `published` 版本） |
+| sourceRef / commit | `v0.1.1` → `998e2a6`（0.1.0 为 `v0.1.0` → `d316edb`） |
+| 平台产物 | 0.1.1：161,834 字节 / SHA-256 `4e19dde25920a3ebe7cac331fc3d2de19ed84917f848565e39dfe23442e01ce5`<br>0.1.0：173,456 字节 / SHA-256 `5e7e9a5bf166ff75b6fad3f4cc7bc3c1453bb2d5438bdaf83f08eaf66c91dab3` |
 | 权限 | `ui.view`、`clipboard.write` |
 
 ### 10.7 后续发版
