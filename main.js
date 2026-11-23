@@ -25,6 +25,13 @@ const COMMAND_ID = "note.open";
 
 const NOTES_FILE = "notes.json";
 const SNAPSHOT_DIR = "snapshots";
+/**
+ * 每个项目「正在打开的笔记」单独存一份：宿主的 docked 视图按 pluginId/viewId
+ * 只缓存一份页面，切换项目时不会重建它，所以视图要靠这份记忆自己换内容。
+ * 独立文件是为了不动 notes.json 的结构——那里只存笔记本身。
+ */
+const PROJECT_MEMORY_FILE = "project-state.json";
+const MAX_PROJECT_MEMORY = 200;
 const MAX_SNAPSHOTS = 5;
 const MAX_NOTES = 5000;
 const MAX_TITLE = 200;
@@ -328,6 +335,138 @@ function flushPersist() {
   persistNow({});
 }
 
+// ── 每个项目「正在打开的笔记」 ──────────────────────────────────────────────
+
+/**
+ * 宿主的 docked 视图按 pluginId/viewId 只缓存一份页面：切换项目时页面不会重建，
+ * 也不会重新执行 boot()。所以「这个项目上次在看哪条笔记」必须自己记住并主动换内容，
+ * 否则切到另一个项目后面板还在显示上一个项目的笔记。
+ *
+ * 记忆按项目键（规范化工作区路径，收件箱为 ""）分开，与笔记的归属无关：
+ * 在项目 A 里打开一条收件箱笔记，记住的是「A 在看这条」。
+ * 只存笔记 id，不存标题 / 正文，损坏时直接丢掉重建，不影响 notes.json。
+ */
+let projectMemory = { schema: 1, projects: {} };
+
+function projectMemoryFile() {
+  return path.join(dataDir, PROJECT_MEMORY_FILE);
+}
+
+/** 按更新时间保留最近 MAX_PROJECT_MEMORY 个项目，超出的直接丢弃。 */
+function pruneProjectMemory(projects) {
+  const entries = Object.entries(projects).sort((a, b) =>
+    a[1].updatedAt < b[1].updatedAt ? 1 : a[1].updatedAt > b[1].updatedAt ? -1 : 0,
+  );
+  const kept = {};
+  for (const [key, entry] of entries.slice(0, MAX_PROJECT_MEMORY)) kept[key] = entry;
+  return kept;
+}
+
+function normalizeProjectMemory(raw) {
+  const source =
+    raw && typeof raw === "object" && raw.projects && typeof raw.projects === "object"
+      ? raw.projects
+      : {};
+  const projects = {};
+  for (const [rawKey, entry] of Object.entries(source)) {
+    if (!entry || typeof entry !== "object") continue;
+    if (typeof entry.activeNoteId !== "string" || !entry.activeNoteId) continue;
+    projects[normalizeProjectKey(rawKey)] = {
+      activeNoteId: entry.activeNoteId,
+      updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : nowIso(),
+    };
+  }
+  return { schema: 1, projects: pruneProjectMemory(projects) };
+}
+
+function loadProjectMemory() {
+  let raw = null;
+  try {
+    raw = readJson(projectMemoryFile());
+    projectMemory = normalizeProjectMemory(raw);
+  } catch (error) {
+    projectMemory = normalizeProjectMemory(null);
+    if (error?.code !== "ENOENT") {
+      log(`project-state.json unreadable, reset: ${error?.message || error}`);
+    }
+    return;
+  }
+  // 读入时裁掉的条目要落盘，否则每启动一次都要重算一遍上限
+  const before = raw?.projects && typeof raw.projects === "object" ? Object.keys(raw.projects).length : 0;
+  if (before !== Object.keys(projectMemory.projects).length) saveProjectMemory();
+}
+
+function saveProjectMemory() {
+  if (!dataDir) return;
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+    atomicWrite(projectMemoryFile(), JSON.stringify(projectMemory, null, 2));
+  } catch (error) {
+    log(`project memory save failed: ${error?.message || error}`);
+  }
+}
+
+/**
+ * 项目记忆里的笔记：必须仍然存在，而且要么属于这个项目、要么是跨项目的收件箱笔记。
+ * 对不上就当没有记忆（顺手清掉过期条目），面板退回列表，绝不显示另一个项目的笔记。
+ */
+function rememberedNoteFor(projectKey) {
+  const key = normalizeProjectKey(projectKey);
+  const entry = projectMemory.projects[key];
+  if (!entry) return null;
+  const note = findNote(entry.activeNoteId);
+  if (!note || (note.projectKey && note.projectKey !== key)) {
+    delete projectMemory.projects[key];
+    saveProjectMemory();
+    return null;
+  }
+  return note;
+}
+
+/** 删掉 / 撤销删除时同步清理指向这条笔记的记忆。 */
+function forgetNoteEverywhere(id) {
+  let changed = false;
+  for (const [key, entry] of Object.entries(projectMemory.projects)) {
+    if (entry.activeNoteId !== id) continue;
+    delete projectMemory.projects[key];
+    changed = true;
+  }
+  if (changed) saveProjectMemory();
+}
+
+/**
+ * 记下「这个项目正在看哪条笔记」。id 为空表示回到列表、没有打开的笔记。
+ * 项目键一律由插件进程自己取，不接受面板传来的路径。
+ */
+async function rememberNote(payload) {
+  const id = typeof payload?.id === "string" ? payload.id : "";
+  const project = await currentProject();
+  const key = project.key;
+  if (id) {
+    const note = findNote(id);
+    if (!note) throw fail("NOT_FOUND", "这条笔记不存在或已被删除。");
+    // 只记「属于这个项目」或「跨项目收件箱」的笔记：在项目 B 里从「全部」打开
+    // 项目 A 的笔记不应变成 B 的记忆，否则切回 B 时会显示别人项目的笔记。
+    if (note.projectKey && note.projectKey !== key) {
+      return { projectKey: key, activeNoteId: "", changed: false };
+    }
+    const previous = projectMemory.projects[key];
+    if (previous?.activeNoteId === id) {
+      return { projectKey: key, activeNoteId: id, changed: false };
+    }
+    projectMemory.projects[key] = { activeNoteId: id, updatedAt: nowIso() };
+    projectMemory.projects = pruneProjectMemory(projectMemory.projects);
+    saveProjectMemory();
+    return { projectKey: key, activeNoteId: id, changed: true };
+  }
+  if (!projectMemory.projects[key]) {
+    return { projectKey: key, activeNoteId: "", changed: false };
+  }
+  delete projectMemory.projects[key];
+  saveProjectMemory();
+  return { projectKey: key, activeNoteId: "", changed: true };
+}
+
 // ── 查询 ────────────────────────────────────────────────────────────────────
 
 async function currentProject() {
@@ -415,6 +554,11 @@ async function listNotes(payload) {
     all: store.notes.length,
   };
 
+  // 项目记忆里的那篇「正在打开的笔记」：面板切换项目后靠它换内容。
+  // 只回报当前范围（含搜索词）里真的能看到的那条，视图拿到就直接恢复。
+  const remembered = rememberedNoteFor(project.key);
+  const restorable = remembered && items.some((item) => item.id === remembered.id);
+
   return {
     scope: effectiveScope,
     requestedScope: scope,
@@ -424,6 +568,7 @@ async function listNotes(payload) {
     project,
     hasProject: Boolean(project.key),
     projects: projectIndex(),
+    activeNoteId: restorable ? remembered.id : "",
     limits: { notes: MAX_NOTES, title: MAX_TITLE, body: MAX_BODY, total: store.notes.length },
   };
 }
@@ -491,6 +636,7 @@ function deleteNote(payload) {
   if (index < 0) throw fail("NOT_FOUND", "这条笔记不存在或已被删除。");
   const [note] = store.notes.splice(index, 1);
   trash.set(id, { note, at: Date.now() });
+  forgetNoteEverywhere(id);
   schedulePersist();
   return { id, meta: metaOf(note) };
 }
@@ -536,6 +682,8 @@ async function onPanelInvoke(channel, payload) {
         return undoDelete(payload);
       case "note:copy":
         return await copyText(payload);
+      case "note:remember":
+        return await rememberNote(payload);
       case "note:diag":
         return writeDiag(payload);
       default:
@@ -569,6 +717,7 @@ async function onLoad() {
     dataDir = await pi.plugin.getDataPath();
     fs.mkdirSync(dataDir, { recursive: true });
     loadStore();
+    loadProjectMemory();
   } catch (error) {
     dataDir = null;
     log(`data directory unavailable: ${error?.message || error}`);

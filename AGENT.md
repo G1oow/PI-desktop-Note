@@ -24,6 +24,7 @@
   - 其它全部是本插件通道 `note:*`，由 `main.js` 的 `onPanelInvoke` 处理。
   - 新增通道：`main.js` 加 case + 校验入参 + 返回纯数据；`app.js` 加 `call("note:xxx")`。
 - 面板与主进程之间**只传 id / 标题 / 正文**，主进程按 id 合并，未知字段丢弃。
+- **docked 视图按 `pluginId/viewId` 只缓存一份页面**：切换项目 / 会话时页面不重建、`boot()` 不重跑。所以「跟项目换内容」必须自己处理：`workspace:changed` → `syncProject()`；项目键变了先 `flushSave()` 落盘上一个项目的笔记，再按 `project-state.json` 恢复新项目正在打开的那条，没有就回列表。首次同步（`projectKey === null`）也按记忆恢复。
 
 ## 3. 硬性约束
 
@@ -39,6 +40,7 @@
 - `notes.json` 单文件，原子写：`tmp → fsync → rename`。
 - 快照：`snapshots/`，10 分钟最多一份，保留 5 份；`notes.json` 损坏时自动回退到最新快照。
 - 上限：5000 条 / 标题 200 字 / 正文 200000 字，超长截断。
+- `project-state.json`：每个项目「正在打开的笔记」（只存 `{ activeNoteId, updatedAt }`，按规范化工作区路径做键，最多 200 个项目，按更新时间裁剪）。读入时校验并丢掉过期条目；`notes.json` 损坏回退快照时它不受影响；指向已删除 / 别的项目的笔记一律视为没有记忆。通道 `note:remember`（`{ id }`，空串表示回列表）。
 - 结构变更必须同时改：读取时的字段校验、写盘时的白名单、`smoke-main.cjs` 的用例。
 - 诊断：面板上报的布局数据写 `diagnostics.log`（`note:diag` 通道）。只落白名单字段（宽度、缩放、滚动尺寸、UA），**不得**写入标题或正文；超过 64 KiB 自动只留后半。
 
@@ -130,6 +132,7 @@ $c = Get-Content views/styles.css -Raw; "$(([regex]::Matches($c,'\{')).Count)/$(
 ```
 
 - 数据层冒烟：`node <scratch>\smoke-main.cjs`（25 项，含快照 / 损坏回退 / 上限 / 未知通道 / 诊断白名单）。
+- 项目记忆冒烟：`node <scratch>\smoke-project-memory.cjs`（21 项：切项目不串笔记、切回恢复、回列表清空、按范围过滤、拒绝别的项目的笔记、删除清理、损坏重置、200 条上限）。
 - 插件校验：`PluginCheck`（清单、入口、面板、权限、包体上限），必须零警告。
 - 视觉 / 交互：用 `<scratch>\build-preview.cjs [dark|light] [list|editor|preview]` 生成带 mock bridge 的预览页，在浏览器面板里逐态核对计算样式与截图。
 - 打包：`PluginPack` 生成 `dist/io.github.g1oow.sidebar-note-<version>.piplug`；不要用 shell 手工打 zip（安装器只认未压缩归档）。
@@ -146,6 +149,7 @@ $c = Get-Content views/styles.css -Raw; "$(([regex]::Matches($c,'\{')).Count)/$(
 6. 面板关闭 / 切走前会 `flushSave()`（`visibilitychange`、`window blur`），所以「未保存」提示只覆盖编辑器内的离开动作。
 7. 宿主对 docked 视图调 `resetEmbeddedSurfaceChrome()`，给 `html` **和** `body` 写 inline `background: transparent`。inline 盖过样式表，所以 `body { background: var(--bg) }` 在宿主里等于没设——只剩自带 `--bg-bar` 的顶栏/状态栏有色、主体露白。**底色必须画在 `.shell` 上**，不要放 `body`。
 8. `contributes.commands[].title` 在 schema 文档里写作 `string | { en, "zh-CN" }`，但宿主 0.22.0 的校验器只接受**字符串**：写成双语对象会被 `PluginCheck` 拒绝（`command "note.open" requires a title`）。命令标题保持单字符串，本地化交给运行时 `pi.commands.register`。
+9. docked 视图按 `pluginId/viewId` 缓存，**切项目 / 切会话不重建页面、不重跑 `boot()`**：只在 `workspace:changed` 里刷列表，编辑器会继续显示上一个项目的笔记（用户报过）。必须 `syncProject()` 比对项目键后自己换内容，见 2 节。
 
 ## 10. 发布到插件市场
 
@@ -199,8 +203,8 @@ $c = Get-Content views/styles.css -Raw; "$(([regex]::Matches($c,'\{')).Count)/$(
 | 项 | 值 |
 |---|---|
 | 插件 id | `io.github.g1oow.sidebar-note` |
-| 当前版本 | `0.1.1`（status `approved`，等运营上架；`0.1.0` 为已 `published` 版本） |
-| sourceRef / commit | `v0.1.1` → `998e2a6`（0.1.0 为 `v0.1.0` → `d316edb`） |
+| 当前版本 | `0.1.2`（本地，尚未提交平台；平台上 `0.1.1` 为 `approved`、`0.1.0` 为 `published`） |
+| sourceRef / commit | 0.1.2 待合并后打 tag；`v0.1.1` → `998e2a6`，`v0.1.0` → `d316edb` |
 | 平台产物 | 0.1.1：161,834 字节 / SHA-256 `4e19dde25920a3ebe7cac331fc3d2de19ed84917f848565e39dfe23442e01ce5`<br>0.1.0：173,456 字节 / SHA-256 `5e7e9a5bf166ff75b6fad3f4cc7bc3c1453bb2d5438bdaf83f08eaf66c91dab3` |
 | 权限 | `ui.view`、`clipboard.write` |
 
