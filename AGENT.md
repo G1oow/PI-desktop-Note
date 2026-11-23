@@ -203,9 +203,9 @@ $c = Get-Content views/styles.css -Raw; "$(([regex]::Matches($c,'\{')).Count)/$(
 | 项 | 值 |
 |---|---|
 | 插件 id | `io.github.g1oow.sidebar-note` |
-| 当前版本 | `0.1.2`（本地，尚未提交平台；平台上 `0.1.1` 为 `approved`、`0.1.0` 为 `published`） |
-| sourceRef / commit | 0.1.2 待合并后打 tag；`v0.1.1` → `998e2a6`，`v0.1.0` → `d316edb` |
-| 平台产物 | 0.1.1：161,834 字节 / SHA-256 `4e19dde25920a3ebe7cac331fc3d2de19ed84917f848565e39dfe23442e01ce5`<br>0.1.0：173,456 字节 / SHA-256 `5e7e9a5bf166ff75b6fad3f4cc7bc3c1453bb2d5438bdaf83f08eaf66c91dab3` |
+| 当前版本 | `0.1.2`（状态 `approved`，等运营在后台发布；`0.1.1`、`0.1.0` 为已 `published` 版本） |
+| sourceRef / commit | `v0.1.2` → `d15c636`；`v0.1.1` → `998e2a6`，`v0.1.0` → `d316edb` |
+| 平台产物 | 0.1.2：1,165,658 字节 / SHA-256 `c73dcd01b81cb508525fd2972f31e230059c9ea0bb0c82286c7282c98ed79b0d`（含 `screenshots/`，比本地包大）<br>0.1.1：161,834 字节 / SHA-256 `4e19dde25920a3ebe7cac331fc3d2de19ed84917f848565e39dfe23442e01ce5`<br>0.1.0：173,456 字节 / SHA-256 `5e7e9a5bf166ff75b6fad3f4cc7bc3c1453bb2d5438bdaf83f08eaf66c91dab3` |
 | 权限 | `ui.view`、`clipboard.write` |
 
 ### 10.7 后续发版
