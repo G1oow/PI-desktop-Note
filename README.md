@@ -11,7 +11,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/PI--Desktop-%E2%89%A50.9.0-blue" alt="PI-Desktop >= 0.9.0" />
-  <img src="https://img.shields.io/badge/version-0.1.1-orange" alt="version 0.1.1" />
+  <img src="https://img.shields.io/badge/version-0.1.2-orange" alt="version 0.1.2" />
   <img src="https://img.shields.io/badge/permissions-ui.view%20%2B%20clipboard.write-lightgrey" alt="permissions" />
   <img src="https://img.shields.io/badge/license-MIT-green" alt="license MIT" />
 </p>
@@ -73,7 +73,7 @@
 ```bash
 pnpm pi-plugin check .
 pnpm pi-plugin pack .
-# → dist/io.github.g1oow.sidebar-note-0.1.1.piplug
+# → dist/io.github.g1oow.sidebar-note-0.1.2.piplug
 ```
 
 然后在 **扩展 → ⋯ → 安装插件包** 里选择生成的 `.piplug`（store-only ZIP，必须用 devkit 打包）。
@@ -92,6 +92,8 @@ pnpm pi-plugin pack .
 | 收件箱 | 不绑定任何项目的笔记，跨项目通用 |
 | 项目 | 当前会话工作区的笔记（没有打开项目时自动退回收件箱并给出提示） |
 | 全部 | 所有项目的笔记，卡片上额外显示所属项目 |
+
+面板跟着项目走：切到另一个项目时会先保存上一个项目的改动，再恢复这个项目上次正在编辑的那条笔记（没有就显示它的列表）。宿主的 docked 视图是同一个页面，切换项目不会重建它。
 
 ### 快捷键
 
@@ -115,7 +117,8 @@ pnpm pi-plugin pack .
 ## 数据与存储
 
 - **位置**：`pi.plugin.getDataPath()` 给出的插件私有目录，通常是 `<PI 数据目录>/plugins/data/io.github.g1oow.sidebar-note/`。
-- **文件**：`notes.json`（`{ schema: 1, notes: [...] }`）+ `snapshots/*.json`。
+- **文件**：`notes.json`（`{ schema: 1, notes: [...] }`）+ `snapshots/*.json` + `project-state.json`。
+- **项目记忆**：`project-state.json` 按规范化工作区路径记住「这个项目正在打开哪条笔记」（只存笔记 id 与时间戳，最多 200 个项目）。切项目时先保存上一个项目的改动再恢复新项目那条；记忆失效（笔记已删、属于别的项目、文件损坏）就当没有，直接显示列表。
 - **写入**：临时文件 → `fsync` → `rename`；写盘前按需留快照，读取失败自动回退。
 - **界面偏好**（范围、预览开关、缩放、主题）存在视图页的 `localStorage`，不写进笔记文件。
 - **诊断**：`diagnostics.log` 只在面板启动和尺寸变化时记录真实布局（面板宽度、缩放、滚动尺寸等白名单字段），**不记录任何笔记内容**，每次会话最多 40 条、超过 64 KiB 自动只保留后半。
@@ -149,6 +152,7 @@ views/app.js         视图逻辑：列表、编辑器、Markdown 渲染、自�
 | `note:pin` / `note:delete` / `note:undoDelete` | 置顶、删除、撤销删除 |
 | `note:copy` | 仅在用户主动点击时写剪贴板 |
 | `note:diag` | 写入布局诊断（白名单字段） |
+| `note:remember` | 记住 / 清掉「这个项目正在打开的笔记」（只收笔记 id） |
 
 **安全渲染**：所有用户文本都通过 `textContent` / text node 渲染，从不拼 `innerHTML`；链接只接受 `http(s):` 与 `mailto:`。主进程只读写自己的数据目录，且不接受面板传来的路径。
 

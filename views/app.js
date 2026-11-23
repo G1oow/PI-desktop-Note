@@ -82,6 +82,7 @@
       loadFailed: "读取失败",
       emptyPreview: "（正文为空）",
       yesterday: "昨天",
+      switchBlocked: "上一个项目的改动没保存成功，先留在原处",
     },
     en: {
       newNote: "New",
@@ -149,6 +150,7 @@
       loadFailed: "Could not load",
       emptyPreview: "(empty note)",
       yesterday: "Yesterday",
+      switchBlocked: "The previous project's edits could not be saved, staying here",
     },
   };
 
@@ -173,8 +175,8 @@
 
   const els = {};
   let saveTimer = null;
-  let saveInFlight = false;
-  let saveAgain = false;
+  /** 正在进行的那次保存；切项目 / 切笔记前要等它落地。 */
+  let savePromise = null;
   let snackTimer = null;
   let lastListAt = 0;
   let searchTimer = null;
@@ -467,14 +469,20 @@
     list.scrollTop = 0;
   }
 
-  async function refreshList() {
+  /**
+   * 取列表数据并写进 state。options.defer 为真时只更新数据、不渲染（切项目时不能
+   * 让旧笔记先闪一下）；options.token 与当前同步令牌不一致时整个结果作废，
+   * 免得慢回来的旧响应盖掉新项目的状态。
+   */
+  async function refreshList(options) {
     let data;
     try {
       data = await call("note:list", { scope: state.scope, query: state.query });
     } catch (error) {
       showSnack(errorText(error), null, null, 5000);
-      return;
+      return null;
     }
+    if (options?.token !== undefined && options.token !== syncToken) return null;
     state.effectiveScope = data.scope || state.scope;
     state.items = Array.isArray(data.items) ? data.items : [];
     state.counts = data.counts || state.counts;
@@ -483,21 +491,105 @@
     lastListAt = Date.now();
     renderTabs();
     renderHint();
+    if (options?.defer) return data;
     if (state.mode === "list") renderList();
     else renderEditorChrome();
+    return data;
   }
 
-  async function showList() {
-    await flushSave();
+  /** 回到列表态（不重新取列表数据，调用方负责刷新）。 */
+  function enterListMode() {
     state.mode = "list";
     state.current = null;
     state.preview = false;
     els.editorPane.hidden = true;
     els.listBar.hidden = false;
     els.listPane.hidden = false;
-    await refreshList();
+    renderList();
   }
 
+  async function showList() {
+    // 切项目也会重新进入列表态：记下同步令牌，中途被 syncProject 抢先就不要再清记忆
+    const token = syncToken;
+    await flushSave();
+    enterListMode();
+    await refreshList();
+    if (token !== syncToken) return;
+    // 回到列表 = 这个项目没有正在打开的笔记，清掉记忆（切换项目再回来时显示列表）。
+    // 等它落地再返回，避免紧接着「打开某条笔记」的写入被这次清空盖掉。
+    await rememberActive("");
+  }
+
+  // ── 跟随项目切换 ──────────────────────────────────────────────────────────
+
+  /** 上一次同步到的工作区项目键；null 表示还没同步过。 */
+  let projectKey = null;
+  let syncToken = 0;
+
+  /**
+   * 记住「这个项目正在看哪条笔记」，切换项目后据此恢复；空 id 表示回到列表。
+   * 只传笔记 id：项目键由插件进程按当前工作区自己算，切项目瞬间的竞态由它校验笔记归属。
+   */
+  function rememberActive(id) {
+    return call("note:remember", { id: id || "" }).catch(() => {
+      /* 记忆写失败不影响使用，下次打开只是回到列表 */
+    });
+  }
+
+  /**
+   * 宿主的 docked 视图按 pluginId/viewId 只缓存一份页面：切换项目时页面不重建、
+   * boot() 不会重跑，state 里还留着上一个项目的笔记。所以项目键一变就自己换内容：
+   * 先落盘上一个项目的笔记，再打开新项目记忆里的那条，没有记忆就回列表。
+   * 首次同步（projectKey === null）也按记忆恢复，让「打开侧边栏」就能接上。
+   */
+  async function syncProject() {
+    const token = ++syncToken;
+    const data = await refreshList({ defer: true, token });
+    if (!data) return;
+    const nextKey = data.project?.key || "";
+    // activeNoteId 由插件进程按「当前范围里能看到」筛过，视图拿到就能直接恢复
+    const activeNoteId = data.activeNoteId || "";
+    const first = projectKey === null;
+    const restore = first ? Boolean(activeNoteId) : projectKey !== nextKey;
+    if (!restore) {
+      // 项目没变：只把列表 / 面包屑重绘一遍，不动正在编辑的内容
+      projectKey = nextKey;
+      if (state.mode === "list") renderList();
+      else renderEditorChrome();
+      return;
+    }
+    // 切换成功才认这个项目键：保存失败时保留旧内容和旧键，下次事件再试
+    if (await enterProjectSession(activeNoteId)) projectKey = nextKey;
+  }
+
+  /**
+   * 切换项目后显示什么：该项目记忆里的笔记，没有就回到它的列表。
+   * 返回 false 表示上一个项目的改动没保存成功，面板保持原样。
+   */
+  async function enterProjectSession(activeNoteId) {
+    // 先把上一个项目的编辑内容落盘：它属于上一个项目，不能跟着一起丢
+    await flushSave();
+    if (state.dirty) {
+      showSnack(`${t("saveFailed")}：${t("switchBlocked")}`, null, null, 6000);
+      return false;
+    }
+    if (activeNoteId) {
+      if (state.current?.id === activeNoteId) {
+        renderEditorChrome();
+        return true;
+      }
+      try {
+        const data = await call("note:read", { id: activeNoteId });
+        state.current = data.note;
+        showEditor();
+        return true;
+      } catch {
+        /* 记忆里的笔记已不可用：退回列表 */
+      }
+    }
+    enterListMode();
+    return true;
+  }
   // ── 编辑器 ────────────────────────────────────────────────────────────────
 
   function renderPinButton() {
@@ -947,6 +1039,8 @@
       const data = await call("note:read", { id });
       state.current = data.note;
       showEditor();
+      // 记住「这个项目正在打开这条笔记」：切换项目再回来、或重新打开面板都能接上
+      rememberActive(id);
     } catch (error) {
       showSnack(errorText(error), null, null, 5000);
       await refreshList();
@@ -964,6 +1058,7 @@
       els.clearSearch.hidden = true;
       showEditor();
       els.bodyInput.focus();
+      rememberActive(data.note.id);
     } catch (error) {
       showSnack(errorText(error), null, null, 5000);
     }
@@ -980,24 +1075,34 @@
     saveTimer = setTimeout(() => void flushSave(), SAVE_DEBOUNCE_MS);
   }
 
+  /**
+   * 立即写盘。有保存正在进行时等它结束后再看是否还有改动 —— 切项目 / 切笔记
+   * 都靠这个方法保证「上一个项目的改动真的落地了」。
+   */
   async function flushSave() {
     clearTimeout(saveTimer);
     saveTimer = null;
-    if (!state.current || !state.dirty) return;
-    if (saveInFlight) {
-      saveAgain = true;
-      return;
+    if (savePromise) {
+      try {
+        await savePromise;
+      } catch {
+        /* 失败状态已在下面处理过 */
+      }
     }
-    const id = state.current.id;
+    if (!state.current || !state.dirty) return;
+    const note = state.current;
+    const id = note.id;
     const title = els.titleInput.value;
     const body = els.bodyInput.value;
-    saveInFlight = true;
     state.dirty = false;
     setSaveStatus(t("saving"));
+    let saved = false;
+    savePromise = call("note:save", { id, title, body });
     try {
-      const result = await call("note:save", { id, title, body });
-      state.current.title = title;
-      state.current.body = body;
+      const result = await savePromise;
+      saved = true;
+      note.title = title;
+      note.body = body;
       if (!state.dirty) {
         els.saveBtn.classList.remove("is-dirty");
         setSaveStatus(`${t("saved")} ${formatClock(result.updatedAt || new Date().toISOString())}`);
@@ -1008,11 +1113,9 @@
       els.saveBtn.classList.add("is-dirty");
       setSaveStatus(`${t("saveFailed")}：${errorText(error)}`, true);
     } finally {
-      saveInFlight = false;
-      if (saveAgain) {
-        saveAgain = false;
-        saveTimer = setTimeout(() => void flushSave(), SAVE_DEBOUNCE_MS);
-      }
+      savePromise = null;
+      // 保存期间又有改动才补一次；失败不自动重试，交给下一次输入或显式保存
+      if (saved && state.dirty) saveTimer = setTimeout(() => void flushSave(), SAVE_DEBOUNCE_MS);
     }
   }
 
@@ -1636,18 +1739,25 @@
     });
 
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") void flushSave();
+      if (document.visibilityState === "hidden") {
+        void flushSave();
+        return;
+      }
+      // 面板重新可见时补一次项目同步：宿主不一定每次都推 workspace:changed 给 docked 视图
+      if (Date.now() - lastListAt > LIST_REFRESH_MIN_MS) void syncProject();
     });
 
     window.addEventListener("focus", () => {
-      if (state.mode === "list" && Date.now() - lastListAt > LIST_REFRESH_MIN_MS) void refreshList();
+      if (Date.now() - lastListAt <= LIST_REFRESH_MIN_MS) return;
+      // 焦点回来也走一次项目同步：切项目时宿主不一定每次都来得及推事件
+      void syncProject();
     });
 
     if (bridge && typeof bridge.on === "function") {
       bridge.on("appearance:changed", (appearance) => applyAppearance(appearance));
+      // 宿主的 docked 视图是同一份页面：切项目不会重建，必须自己换内容
       bridge.on("workspace:changed", () => {
-        if (state.mode === "list") void refreshList();
-        else void refreshList().then(() => renderEditorChrome());
+        void syncProject();
       });
     }
   }
@@ -1742,7 +1852,8 @@
     }
 
     await syncAppearance();
-    await refreshList();
+    // 首次同步也走项目同步：打开面板就接上这个项目「正在打开的笔记」
+    await syncProject();
     reportDiag("boot");
   }
 

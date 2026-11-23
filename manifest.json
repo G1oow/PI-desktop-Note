@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.g1oow.sidebar-note",
   "name": "Notes",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "工作面板里的笔记：按项目隔离的笔记列表加一个全局收件箱，Markdown 编辑与预览，自动保存。",
   "author": "G1oow",
   "homepage": "https://github.com/G1oow/PI-desktop-Note",
